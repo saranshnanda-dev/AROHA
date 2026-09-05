@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background-color: #FDFBF7;
+}
+.text-normal { font-size: 18px; line-height: 1.5; }
+.text-large { font-size: 21px; line-height: 1.5; }
+.text-xlarge { font-size: 24px; line-height: 1.5; }
+.text-normal h1 { font-size: 2.25rem; } .text-normal h2 { font-size: 1.875rem; } .text-normal h3 { font-size: 1.5rem; }
+.text-large h1 { font-size: 2.75rem; } .text-large h2 { font-size: 2.25rem; } .text-large h3 { font-size: 1.875rem; }
+.text-xlarge h1 { font-size: 3.25rem; } .text-xlarge h2 { font-size: 2.75rem; } .text-xlarge h3 { font-size: 2.25rem; }
+button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline: 4px solid #2563eb !important; outline-offset: 4px; }
+button, select { min-height: 44px; min-width: 44px; }
+
+/* Scrollbar styling */
+.custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+.dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #334155; }
