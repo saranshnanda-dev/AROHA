@@ -1,137 +1,20 @@
+require('dotenv').config();
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const { db, initializeDatabase } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = 'aroha_sih2026_secret_key';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET is required. Configure it in the backend environment.');
+}
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-
-const db = new sqlite3.Database('./aroha.db', (err) => {
-  if (err) console.error('Database connection error:', err);
-  else console.log('Connected to SQLite database: aroha.db');
-});
-
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    email TEXT UNIQUE,
-    password TEXT,
-    role TEXT,
-    language TEXT DEFAULT 'en',
-    font_size TEXT DEFAULT 'text-normal',
-    high_contrast INTEGER DEFAULT 0,
-    simple_mode INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'ACTIVE',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    avatar TEXT,
-    voice_enabled INTEGER DEFAULT 1,
-    notify_games INTEGER DEFAULT 1,
-    notify_reminders INTEGER DEFAULT 1,
-    notify_recs INTEGER DEFAULT 1,
-    caregiver_code TEXT UNIQUE
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS game_sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    game_id TEXT,
-    difficulty TEXT,
-    score INTEGER,
-    total INTEGER,
-    moves INTEGER,
-    completion_time INTEGER,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS reminders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    title TEXT,
-    time TEXT,
-    completed INTEGER DEFAULT 0
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS recommendations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    activity TEXT,
-    reason TEXT,
-    difficulty TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS activity_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    admin_id INTEGER,
-    target_user_id INTEGER,
-    action TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS notifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    type TEXT,
-    title TEXT,
-    message TEXT,
-    is_read INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    related_id INTEGER
-  )`);
-  
-  db.run(`CREATE TABLE IF NOT EXISTS caregiver_connections (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    elderly_id INTEGER,
-    caregiver_id INTEGER,
-    status TEXT DEFAULT 'PENDING',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Safe migrations
-  const safeMigrations = [
-    // Users table migrations
-    "ALTER TABLE users ADD COLUMN simple_mode INTEGER DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
-    "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'ACTIVE'",
-    "ALTER TABLE users ADD COLUMN avatar TEXT",
-    "ALTER TABLE users ADD COLUMN voice_enabled INTEGER DEFAULT 1",
-    "ALTER TABLE users ADD COLUMN notify_games INTEGER DEFAULT 1",
-    "ALTER TABLE users ADD COLUMN notify_reminders INTEGER DEFAULT 1",
-    "ALTER TABLE users ADD COLUMN notify_recs INTEGER DEFAULT 1",
-    "ALTER TABLE users ADD COLUMN caregiver_code TEXT",
-    
-    // Activity Logs migrations
-    "ALTER TABLE activity_logs ADD COLUMN admin_id INTEGER",
-    "ALTER TABLE activity_logs ADD COLUMN target_user_id INTEGER",
-    "ALTER TABLE activity_logs ADD COLUMN action TEXT",
-
-    // Game Sessions migrations (FIXING THE GAME DATA ERROR)
-    "ALTER TABLE game_sessions ADD COLUMN total INTEGER DEFAULT 1",
-    "ALTER TABLE game_sessions ADD COLUMN moves INTEGER DEFAULT 0",
-    "ALTER TABLE game_sessions ADD COLUMN completion_time INTEGER DEFAULT 0"
-  ];
-
-  safeMigrations.forEach(stmt => {
-    db.run(stmt, () => {});
-  });
-
-  // Ensure demo accounts exist
-  const hashPassword = bcrypt.hashSync('demo123', 8);
-  const insertUser = db.prepare("INSERT OR IGNORE INTO users (id, name, email, password, role, status) VALUES (?, ?, ?, ?, ?, 'ACTIVE')");
-  insertUser.run(1, 'Eleanor Vance', 'elder@aroha.demo', hashPassword, 'ELDERLY');
-  insertUser.run(2, 'Sarah Vance', 'caregiver@aroha.demo', hashPassword, 'CAREGIVER');
-  insertUser.run(3, 'Dr. Robert Thorne', 'professional@aroha.demo', hashPassword, 'PROFESSIONAL');
-  insertUser.run(4, 'Admin System', 'admin@aroha.demo', hashPassword, 'ADMIN');
-  insertUser.finalize();
-
-  db.run(`INSERT OR IGNORE INTO caregiver_connections (id, elderly_id, caregiver_id, status) VALUES (1, 1, 2, 'CONNECTED')`);
-});
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -625,4 +508,9 @@ app.delete('/api/admin/users/:id', authenticateToken, authorizeRole('ADMIN'), (r
 });
 
 app.use((req, res) => { res.status(404).json({ error: 'Not found' }); });
-app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+initializeDatabase()
+  .then(() => app.listen(PORT, '0.0.0.0', () => console.log(`Backend running on port ${PORT}`)))
+  .catch(error => {
+    console.error('Database initialization failed:', error.message);
+    process.exitCode = 1;
+  });

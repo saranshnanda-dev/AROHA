@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Eye, EyeOff, Bell, Settings as SettingsIcon, User, Brain, Activity, Sparkles, Shield, LayoutDashboard, Menu, X, LogOut, CheckCircle, Clock, Users, HelpCircle, MessageSquare, ChevronRight, Target, Trophy, Calendar, TrendingUp, Gamepad2, HeartPulse, Info, Camera, Save, Lock, Monitor, Type, UserCheck, UserX, ArrowLeft, Search, Download, XCircle, Plus, Trash2, RefreshCw, LayoutGrid, Play, ArrowDownUp, FileText, ShieldAlert, UserPlus, Check, Copy } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 
-const API_URL = (import.meta as any).env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = (import.meta as any).env.VITE_API_URL || '';
 
 export default function AdminDashboard({ token, t, hc, activeView = 'overview' }: any) {
   const [stats, setStats] = useState<any>({});
