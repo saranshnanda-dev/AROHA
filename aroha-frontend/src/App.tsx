@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import ElderlyDashboard from './ElderlyDashboard';
 import CaregiverDashboard from './CaregiverDashboard';
 import ProfessionalDashboard from './ProfessionalDashboard';
@@ -460,6 +461,7 @@ export default function App() {
           </div>
         </main>
       </div>
+      <Analytics />
     </div>
   );
 }
