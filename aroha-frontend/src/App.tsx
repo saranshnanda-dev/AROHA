@@ -8,6 +8,7 @@ import ElderlyProgress from './ElderlyProgress';
 import Notifications from './Notifications';
 import Profile from './Profile';
 import Settings from './Settings';
+import VoiceAssistant from './VoiceAssistant';
 import { Eye, EyeOff, Bell, Settings as SettingsIcon, User, Brain, Activity, Sparkles, Shield, LayoutDashboard, Menu, X, LogOut, CheckCircle, Clock, Users, HelpCircle, MessageSquare, ChevronRight, Target, Trophy, Calendar, TrendingUp, Gamepad2, HeartPulse, Info, Camera, Save, Lock, Monitor, Type, UserCheck, UserX, ArrowLeft, Search, Download, XCircle, Plus, Trash2, RefreshCw, LayoutGrid, Play, ArrowDownUp, FileText, ShieldAlert, UserPlus, Check, Copy } from 'lucide-react';
 import { translations } from './translations';
 
@@ -441,13 +442,16 @@ export default function App() {
                 <button onClick={() => setView('dashboard')} className="mt-6 px-4 py-2 bg-slate-900 text-white rounded-lg font-medium text-sm">Return to Dashboard</button>
               </div>
             )}
-            {view === 'chat' && (
-              <div className={`p-12 text-center rounded-xl border border-dashed ${highContrast ? 'border-slate-700 text-slate-400' : 'bg-white border-slate-300 text-slate-500'}`}>
-                <MessageSquare className="mx-auto mb-4 opacity-50" size={32} />
-                <h3 className="text-lg font-semibold mb-2">Talk to AROHA</h3>
-                <p className="text-sm">Conversational AI integration coming soon.</p>
-                <button onClick={() => setView('dashboard')} className="mt-6 px-4 py-2 bg-slate-900 text-white rounded-lg font-medium text-sm">Return to Dashboard</button>
-              </div>
+            {view === 'chat' && role === 'ELDERLY' && (
+              <VoiceAssistant
+                token={token}
+                user={user}
+                t={t}
+                hc={highContrast}
+                lang={lang}
+                onNavigate={(v: string) => setView(v)}
+                onStartGame={(gameId: any, diff = 'Easy') => { setSelectedGame(gameId as any); setSelectedDiff(diff); setView('game'); }}
+              />
             )}
             {view === 'caregiver' && role === 'ELDERLY' && (
               <div className={`p-12 text-center rounded-xl border border-dashed ${highContrast ? 'border-slate-700 text-slate-400' : 'bg-white border-slate-300 text-slate-500'}`}>
