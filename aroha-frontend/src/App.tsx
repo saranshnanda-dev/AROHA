@@ -2,7 +2,331 @@ import React, { useState, useEffect } from 'react';
 import ElderlyDashboard from './ElderlyDashboard';
 import CaregiverDashboard from './CaregiverDashboard';
 import ProfessionalDashboard from './ProfessionalDashboard';
-import AdminDashboard from './AdminDashboard';
+import AdminDashboard from './AdminDashboard';import React, { useState, useEffect, useRef } from 'react';
+import { Mic, MicOff, Volume2, VolumeX, RotateCcw, Trash2, Send, MessageSquare, AlertCircle } from 'lucide-react';
+
+const API_URL = (import.meta as any).env.VITE_API_URL || '';
+
+// ==========================================================
+// AROHA VOICE — browser-native voice assistant
+// Uses Web Speech API (SpeechRecognition + SpeechSynthesis).
+// No paid AI API required. Commands are matched with simple
+// keyword rules (intent detection), so this can be swapped
+// for an LLM-based intent parser later without changing the
+// surrounding UI or the action functions below.
+// ==========================================================
+
+type Message = { role: 'user' | 'assistant'; text: string };
+type PendingConfirmation = { type: 'complete_reminder'; id: number; title: string } | null;
+
+// Map the app's language setting to a BCP-47 locale for the browser APIs.
+// Hindi/Punjabi recognition support varies by browser — we fall back
+// gracefully to text input if recognition isn't available at all.
+const LOCALE_MAP: Record<string, string> = { en: 'en-IN', hi: 'hi-IN', pa: 'pa-IN' };
+
+export default function VoiceAssistant({ token, user, t, hc, lang, onNavigate, onStartGame }: any) {
+  const [supported, setSupported] = useState(true);
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [interimText, setInterimText] = useState('');
+  const [textInput, setTextInput] = useState('');
+  const [messages, setMessages] = useState<Message[]>([
+    { role: 'assistant', text: `Hello ${user?.name?.split(' ')[0] || ''}! I'm AROHA Voice. Tap the microphone or type below, and say "help" to hear what I can do.` }
+  ]);
+  const [pending, setPending] = useState<PendingConfirmation>(null);
+
+  const recognitionRef = useRef<any>(null);
+  const lastAssistantMsgRef = useRef<string>('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const locale = LOCALE_MAP[lang] || 'en-IN';
+
+  // Set up SpeechRecognition once, and whenever the locale changes.
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { setSupported(false); return; }
+
+    const recognition = new SR();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = locale;
+
+    recognition.onresult = (event: any) => {
+      let interim = '';
+      let final = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) final += transcript;
+        else interim += transcript;
+      }
+      setInterimText(interim);
+      if (final.trim()) {
+        setInterimText('');
+        handleUserUtterance(final.trim());
+      }
+    };
+    recognition.onerror = () => { setIsListening(false); setInterimText(''); };
+    recognition.onend = () => setIsListening(false);
+
+    recognitionRef.current = recognition;
+    return () => { try { recognition.stop(); } catch (e) {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locale]);
+
+  // Auto-scroll conversation to the latest message.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages]);
+
+  const toggleListening = () => {
+    if (!supported) return;
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+    } else {
+      window.speechSynthesis?.cancel();
+      setIsSpeaking(false);
+      try {
+        recognitionRef.current?.start();
+        setIsListening(true);
+      } catch (e) { /* already started */ }
+    }
+  };
+
+  const speak = (text: string) => {
+    lastAssistantMsgRef.current = text;
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = locale;
+    utter.rate = 0.95; // slightly slower — easier to follow for elderly users
+    utter.onstart = () => setIsSpeaking(true);
+    utter.onend = () => setIsSpeaking(false);
+    utter.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utter);
+  };
+
+  const say = (text: string) => {
+    setMessages(prev => [...prev, { role: 'assistant', text }]);
+    speak(text);
+  };
+
+  const stopSpeaking = () => { window.speechSynthesis?.cancel(); setIsSpeaking(false); };
+  const repeatLast = () => { if (lastAssistantMsgRef.current) speak(lastAssistantMsgRef.current); };
+  const clearConversation = () => {
+    setMessages([{ role: 'assistant', text: 'Conversation cleared. How can I help?' }]);
+    setPending(null);
+  };
+
+  const authHeaders = { 'Authorization': `Bearer ${token}` };
+
+  // ---- Command handlers -----------------------------------------------
+
+  const readReminders = async (openView: boolean) => {
+    try {
+      const res = await fetch(`${API_URL}/api/reminders`, { headers: authHeaders });
+      const rows = res.ok ? await res.json() : [];
+      const pending_ = rows.filter((r: any) => !r.completed);
+      if (pending_.length === 0) {
+        say("You have no pending reminders. You're all caught up.");
+      } else {
+        const first = pending_[0];
+        const rest = pending_.length - 1;
+        say(`You have ${pending_.length} reminder${pending_.length > 1 ? 's' : ''}. Next up: ${first.title} at ${first.time}.${rest > 0 ? ` And ${rest} more.` : ''}`);
+      }
+      if (openView) onNavigate('reminders');
+    } catch (e) { say("I couldn't reach your reminders right now. Please try again."); }
+  };
+
+  const readNotifications = async (openView: boolean) => {
+    try {
+      const res = await fetch(`${API_URL}/api/notifications`, { headers: authHeaders });
+      const rows = res.ok ? await res.json() : [];
+      const unread = rows.filter((n: any) => !n.is_read);
+      if (unread.length === 0) say("No new notifications.");
+      else say(`You have ${unread.length} new notification${unread.length > 1 ? 's' : ''}. The latest is: ${unread[0].title}.`);
+      if (openView) onNavigate('notifications');
+    } catch (e) { say("I couldn't reach your notifications right now. Please try again."); }
+  };
+
+  const confirmCompleteReminder = async (id: number, title: string) => {
+    try {
+      await fetch(`${API_URL}/api/reminders/${id}/complete`, { method: 'PUT', headers: authHeaders });
+      say(`Done — I've marked "${title}" as complete.`);
+    } catch (e) { say("Something went wrong marking that reminder as done. Please try from the reminders page."); }
+  };
+
+  const startMarkReminderDone = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/reminders`, { headers: authHeaders });
+      const rows = res.ok ? await res.json() : [];
+      const pending_ = rows.filter((r: any) => !r.completed);
+      if (pending_.length === 0) { say("You don't have any pending reminders to mark as done."); return; }
+      const next = pending_[0];
+      setPending({ type: 'complete_reminder', id: next.id, title: next.title });
+      say(`Do you want me to mark "${next.title}" as done? Say yes or no.`);
+    } catch (e) { say("I couldn't check your reminders right now."); }
+  };
+
+  const HELP_TEXT = "You can say things like: what are my reminders, read my notifications, let's play memory game, show my profile, open settings, my caregiver, what time is it, or go back.";
+
+  // ---- Intent matching --------------------------------------------------
+  // Simple, transparent keyword rules. This is where an LLM-based intent
+  // parser could be dropped in later — everything below this line just
+  // needs a normalized string in, and calls the same action functions.
+
+  const processCommand = async (raw: string) => {
+    const text = raw.toLowerCase().trim();
+
+    // Handle a pending yes/no confirmation first — safety-critical actions
+    // never fire without an explicit confirmation.
+    if (pending) {
+      if (/\b(yes|yeah|confirm|do it|sure)\b/.test(text)) {
+        const p = pending; setPending(null);
+        if (p?.type === 'complete_reminder') await confirmCompleteReminder(p.id, p.title);
+        return;
+      }
+      if (/\b(no|nope|cancel|don't|stop)\b/.test(text)) {
+        setPending(null);
+        say("Okay, I won't do that.");
+        return;
+      }
+      say(`Please say yes or no. Do you want me to mark "${pending.title}" as done?`);
+      return;
+    }
+
+    if (/\b(stop|be quiet|silence)\b/.test(text)) { stopSpeaking(); return; }
+    if (/\b(repeat|say that again|what did you say)\b/.test(text)) { repeatLast(); return; }
+    if (/\b(clear|clear conversation|start over)\b/.test(text)) { clearConversation(); return; }
+    if (/\b(help|what can you do)\b/.test(text)) { say(HELP_TEXT); return; }
+    if (/\b(hello|hi|hey)\b/.test(text)) { say(`Hello! ${HELP_TEXT}`); return; }
+    if (/what time is it|current time/.test(text)) {
+      say(`It's ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`); return;
+    }
+    if (/what.?s the date|today.?s date/.test(text)) {
+      say(`Today is ${new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}.`); return;
+    }
+    if (/mark.*(reminder|done|complete)/.test(text)) { await startMarkReminderDone(); return; }
+    if (/reminder/.test(text)) { await readReminders(/open|show|go to/.test(text)); return; }
+    if (/notification/.test(text)) { await readNotifications(/open|show|go to/.test(text)); return; }
+    if (/memory (game|match)/.test(text)) { say("Starting Memory Match. Good luck!"); onStartGame('Memory Match', 'Easy'); return; }
+    if (/pattern/.test(text)) { say("Starting Pattern Recognition. Good luck!"); onStartGame('Pattern Recognition', 'Easy'); return; }
+    if (/\bgame\b|play/.test(text)) { say("Opening the games menu — pick one and I'll start it for you."); onStartGame('select', 'Easy'); return; }
+    if (/profile/.test(text)) { say("Opening your profile."); onNavigate('profile'); return; }
+    if (/setting/.test(text)) { say("Opening settings."); onNavigate('settings'); return; }
+    if (/caregiver/.test(text)) { say("Opening your caregiver connection."); onNavigate('caregiver'); return; }
+    if (/progress/.test(text)) { say("Opening your progress."); onNavigate('progress'); return; }
+    if (/dashboard|home|go back/.test(text)) { say("Taking you to the dashboard."); onNavigate('dashboard'); return; }
+
+    say("I didn't quite catch that. Say \"help\" to hear what I can do.");
+  };
+
+  const handleUserUtterance = (text: string) => {
+    setMessages(prev => [...prev, { role: 'user', text }]);
+    processCommand(text);
+  };
+
+  const handleTextSend = () => {
+    if (!textInput.trim()) return;
+    handleUserUtterance(textInput.trim());
+    setTextInput('');
+  };
+
+  // ---- UI -----------------------------------------------------------
+
+  const cardBg = hc ? 'bg-[#0f172a] border-slate-800' : 'bg-white border-slate-200';
+  const subtleText = hc ? 'text-slate-400' : 'text-slate-500';
+
+  return (
+    <div className={`rounded-2xl border ${cardBg} p-6 md:p-8 max-w-3xl mx-auto`}>
+      <div className="flex items-center gap-3 mb-1">
+        <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center">
+          <MessageSquare size={18} />
+        </div>
+        <div>
+          <h2 className={`text-lg font-semibold ${hc ? 'text-white' : 'text-slate-900'}`}>AROHA Voice</h2>
+          <p className={`text-sm ${subtleText}`}>Your friendly voice companion</p>
+        </div>
+      </div>
+
+      {!supported && (
+        <div className="mt-4 flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <AlertCircle size={18} className="shrink-0 mt-0.5" />
+          <span>Voice recognition isn't supported in this browser. You can still type your questions below.</span>
+        </div>
+      )}
+
+      {/* Conversation */}
+      <div ref={scrollRef} className="mt-5 h-72 overflow-y-auto custom-scrollbar space-y-3 pr-1">
+        {messages.map((m, i) => (
+          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+              m.role === 'user'
+                ? 'bg-blue-600 text-white rounded-br-sm'
+                : hc ? 'bg-slate-800 text-slate-100 rounded-bl-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'
+            }`}>
+              {m.text}
+            </div>
+          </div>
+        ))}
+        {interimText && (
+          <div className="flex justify-end">
+            <div className="max-w-[80%] px-4 py-2.5 rounded-2xl text-sm italic bg-blue-100 text-blue-700 rounded-br-sm">
+              {interimText}…
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Mic button */}
+      <div className="flex flex-col items-center mt-6 mb-4">
+        <button
+          onClick={toggleListening}
+          disabled={!supported}
+          aria-label={isListening ? 'Stop listening' : 'Start voice command'}
+          className={`w-20 h-20 rounded-full flex items-center justify-center shadow-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+            isListening ? 'bg-rose-500 animate-pulse scale-105' : 'bg-blue-600 hover:bg-blue-700'
+          }`}
+        >
+          {isListening ? <MicOff size={30} className="text-white" /> : <Mic size={30} className="text-white" />}
+        </button>
+        <p className={`mt-2 text-sm font-medium ${subtleText}`}>
+          {isListening ? 'Listening…' : supported ? 'Tap to speak' : 'Voice unavailable — type below'}
+        </p>
+      </div>
+
+      {/* Controls */}
+      <div className="flex items-center justify-center gap-2 mb-5">
+        <button onClick={repeatLast} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border ${hc ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+          <RotateCcw size={14} /> Repeat
+        </button>
+        <button onClick={stopSpeaking} disabled={!isSpeaking} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border disabled:opacity-40 ${hc ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+          {isSpeaking ? <Volume2 size={14} /> : <VolumeX size={14} />} Stop
+        </button>
+        <button onClick={clearConversation} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border ${hc ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+          <Trash2 size={14} /> Clear
+        </button>
+      </div>
+
+      {/* Text fallback — always available, per elderly-friendly & accessibility requirements */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={textInput}
+          onChange={e => setTextInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') handleTextSend(); }}
+          placeholder="Or type a command here…"
+          aria-label="Type a command to AROHA"
+          className={`flex-1 px-4 py-2.5 rounded-lg border text-sm outline-none focus:border-blue-500 ${hc ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'}`}
+        />
+        <button onClick={handleTextSend} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center justify-center">
+          <Send size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 import Games from './Games';
 import ElderlyProgress from './ElderlyProgress';
 import Notifications from './Notifications';
